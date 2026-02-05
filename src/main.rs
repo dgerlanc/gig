@@ -2,11 +2,13 @@ use include_dir::{include_dir, Dir};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::LazyLock;
 
 const DEFAULT_OUTPUT: &str = ".gitignore";
 const GITIGNORE_SUFFIX: &str = ".gitignore";
+const LANG_REQUIRED_ERR: &str = "language is required (e.g., gig -l python)";
 
 static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 static INDEX: LazyLock<HashMap<String, &'static str>> = LazyLock::new(build_index);
@@ -52,18 +54,18 @@ fn main() {
     }
 }
 
-fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, String), String> {
+fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, PathBuf), String> {
     let lang: Option<String> = args
         .opt_value_from_str(["-l", "--lang"])
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| LANG_REQUIRED_ERR)?;
 
-    let lang = lang.ok_or("language is required; use -l <language>")?;
+    let lang = lang.ok_or(LANG_REQUIRED_ERR)?;
 
     // Get positional argument (output path), default to .gitignore
-    let output = args
+    let output: PathBuf = args
         .opt_free_from_str()
         .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| DEFAULT_OUTPUT.to_string());
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_OUTPUT));
 
     Ok((lang, output))
 }
@@ -122,14 +124,14 @@ fn list_languages() {
 }
 
 /// Write content to a file, refusing to overwrite existing files.
-fn write_output(path: &str, content: &str) -> Result<(), String> {
+fn write_output(path: &Path, content: &str) -> Result<(), String> {
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(path)
         .map_err(|e| {
             if e.kind() == ErrorKind::AlreadyExists {
-                format!("file {path} already exists; remove it first or choose a different path")
+                format!("file {} already exists; remove it first or choose a different path", path.display())
             } else {
                 e.to_string()
             }
@@ -251,9 +253,8 @@ mod tests {
     fn test_write_output_creates_file() {
         let dir = test_dir();
         let path = dir.join("test.gitignore");
-        let path_str = path.to_str().unwrap();
 
-        let result = write_output(path_str, "# test content\n");
+        let result = write_output(&path, "# test content\n");
         assert!(result.is_ok());
         assert!(path.exists());
         assert_eq!(fs::read_to_string(&path).unwrap(), "# test content\n");
@@ -266,12 +267,11 @@ mod tests {
     fn test_write_output_refuses_overwrite() {
         let dir = test_dir();
         let path = dir.join("existing.gitignore");
-        let path_str = path.to_str().unwrap();
 
         // Create existing file
         fs::write(&path, "existing content").unwrap();
 
-        let result = write_output(path_str, "new content");
+        let result = write_output(&path, "new content");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
 
@@ -292,7 +292,7 @@ mod tests {
         assert!(result.is_ok());
         let (lang, output) = result.unwrap();
         assert_eq!(lang, "python");
-        assert_eq!(output, ".gitignore");
+        assert_eq!(output, PathBuf::from(".gitignore"));
     }
 
     #[test]
@@ -306,7 +306,7 @@ mod tests {
         assert!(result.is_ok());
         let (lang, output) = result.unwrap();
         assert_eq!(lang, "rust");
-        assert_eq!(output, "custom.gitignore");
+        assert_eq!(output, PathBuf::from("custom.gitignore"));
     }
 
     #[test]
@@ -326,6 +326,15 @@ mod tests {
         let mut args = pico_args::Arguments::from_vec(vec![]);
         let result = parse_args(&mut args);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("language is required"));
+        assert_eq!(result.unwrap_err(), LANG_REQUIRED_ERR);
+    }
+
+    #[test]
+    fn test_parse_args_lang_flag_without_value() {
+        // Simulates `gig -l` without a language value
+        let mut args = pico_args::Arguments::from_vec(vec!["-l".into()]);
+        let result = parse_args(&mut args);
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err(), LANG_REQUIRED_ERR);
     }
 }
