@@ -1,5 +1,5 @@
 use include_dir::{Dir, include_dir};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -93,6 +93,33 @@ fn parse_languages(input: &str) -> Result<Vec<String>, String> {
     }
 
     Ok(languages)
+}
+
+/// Merge multiple templates, deduplicating patterns but preserving comments and blanks.
+fn merge_templates(templates: &[&str]) -> String {
+    let mut seen_patterns: HashSet<&str> = HashSet::new();
+    let mut output = String::new();
+
+    for template in templates {
+        for line in template.lines() {
+            let trimmed = line.trim();
+
+            // Comments and blank lines are always included
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                output.push_str(line);
+                output.push('\n');
+                continue;
+            }
+
+            // Patterns are deduplicated by exact match
+            if seen_patterns.insert(trimmed) {
+                output.push_str(line);
+                output.push('\n');
+            }
+        }
+    }
+
+    output
 }
 
 fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, PathBuf), String> {
@@ -403,5 +430,41 @@ mod tests {
     fn test_parse_languages_whitespace_trimmed() {
         let result = parse_languages(" go , godot ");
         assert_eq!(result, Ok(vec!["go".to_string(), "godot".to_string()]));
+    }
+
+    #[test]
+    fn test_merge_templates_single() {
+        let templates = vec!["# Comment\n*.log\n"];
+        let result = merge_templates(&templates);
+        assert_eq!(result, "# Comment\n*.log\n");
+    }
+
+    #[test]
+    fn test_merge_templates_deduplicates_patterns() {
+        let templates = vec!["# First\n*.log\n", "# Second\n*.log\n*.txt\n"];
+        let result = merge_templates(&templates);
+        assert_eq!(result, "# First\n*.log\n# Second\n*.txt\n");
+    }
+
+    #[test]
+    fn test_merge_templates_preserves_comments() {
+        let templates = vec!["# Same comment\n*.a\n", "# Same comment\n*.b\n"];
+        let result = merge_templates(&templates);
+        assert_eq!(result, "# Same comment\n*.a\n# Same comment\n*.b\n");
+    }
+
+    #[test]
+    fn test_merge_templates_preserves_blank_lines() {
+        let templates = vec!["*.a\n\n*.b\n", "*.c\n\n*.d\n"];
+        let result = merge_templates(&templates);
+        assert_eq!(result, "*.a\n\n*.b\n*.c\n\n*.d\n");
+    }
+
+    #[test]
+    fn test_merge_templates_exact_match_only() {
+        // *.LOG and *.log are different patterns
+        let templates = vec!["*.log\n", "*.LOG\n"];
+        let result = merge_templates(&templates);
+        assert_eq!(result, "*.log\n*.LOG\n");
     }
 }
