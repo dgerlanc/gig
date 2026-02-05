@@ -468,4 +468,20 @@ mod tests {
         let result = merge_templates(&templates);
         assert_eq!(result, "*.log\n*.LOG\n");
     }
+
+    #[test]
+    fn test_multi_language_deduplication() {
+        // Get two templates that likely share some patterns
+        let go = get_template("go").unwrap();
+        let rust = get_template("rust").unwrap();
+
+        let merged = merge_templates(&[go, rust]);
+
+        // Verify merged content contains patterns from both
+        assert!(merged.contains("*.exe"), "should contain Go's *.exe pattern");
+
+        // Count occurrences of *.exe - should only appear once
+        let exe_count = merged.lines().filter(|l| l.trim() == "*.exe").count();
+        assert_eq!(exe_count, 1, "*.exe should only appear once after deduplication");
+    }
 }
