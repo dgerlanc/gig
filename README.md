@@ -11,6 +11,18 @@ cargo build --release
 
 ## Installation
 
+### Homebrew (macOS/Linux)
+
+```bash
+brew install dgerlanc/tap/gig
+```
+
+### From GitHub Releases
+
+Download the appropriate binary from the [releases page](https://github.com/dgerlanc/gig/releases).
+
+### From Source
+
 ```sh
 # 1. Clone this repo
 git clone https://github.com/dgerlanc/gig.git
