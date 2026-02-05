@@ -10,6 +10,27 @@ const DEFAULT_OUTPUT: &str = ".gitignore";
 const GITIGNORE_SUFFIX: &str = ".gitignore";
 const LANG_REQUIRED_ERR: &str = "language is required (e.g., gig -l python)";
 
+const HELP_MSG: &str = r#"gig - generate .gitignore files from GitHub's template collection
+
+Usage:
+  gig -l <language> [output]
+
+Arguments:
+  output    Path to write the .gitignore file (default: .gitignore)
+
+Flags:
+  -l, --lang     Language template to use (required)
+  --list         List all available language templates
+  -h, --help     Show this help message
+  -V, --version  Show version information
+
+Examples:
+  gig -l python                  Create .gitignore for Python in current directory
+  gig -l go .gitignore           Same as above, explicit output path
+  gig -l rust src/.gitignore     Create .gitignore for Rust in src/
+
+Templates are sourced from https://github.com/github/gitignore"#;
+
 static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 static INDEX: LazyLock<HashMap<String, &'static str>> = LazyLock::new(build_index);
 
@@ -19,6 +40,12 @@ fn main() {
     // Handle --help / -h
     if args.contains(["-h", "--help"]) || std::env::args().len() == 1 {
         print_usage();
+        process::exit(0);
+    }
+
+    // Handle --version / -V
+    if args.contains(["-V", "--version"]) {
+        println!("gig {}", env!("CARGO_PKG_VERSION"));
         process::exit(0);
     }
 
@@ -145,27 +172,7 @@ fn write_output(path: &Path, content: &str) -> Result<(), String> {
 }
 
 fn print_usage() {
-    println!(
-        r#"gig - generate .gitignore files from GitHub's template collection
-
-Usage:
-  gig -l <language> [output]
-
-Arguments:
-  output    Path to write the .gitignore file (default: .gitignore)
-
-Flags:
-  -l, --lang     Language template to use (required)
-  --list         List all available language templates
-  -h, --help     Show this help message
-
-Examples:
-  gig -l python                  Create .gitignore for Python in current directory
-  gig -l go .gitignore           Same as above, explicit output path
-  gig -l rust src/.gitignore     Create .gitignore for Rust in src/
-
-Templates are sourced from https://github.com/github/gitignore"#
-    );
+    println!("{HELP_MSG}");
 }
 
 #[cfg(test)]
@@ -338,5 +345,24 @@ mod tests {
         let result = parse_args(&mut args);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err(), LANG_REQUIRED_ERR);
+    }
+
+    #[test]
+    fn test_version_string() {
+        // Verify the version macro returns a valid semver string
+        let version = env!("CARGO_PKG_VERSION");
+        assert!(!version.is_empty(), "version should not be empty");
+        // Basic semver format check (x.y.z)
+        let parts: Vec<&str> = version.split('.').collect();
+        assert!(parts.len() >= 2, "version should have at least major.minor");
+    }
+
+    #[test]
+    fn test_help_message_includes_version_flag() {
+        // Verify the help message documents the version flag
+        assert!(
+            HELP_MSG.contains("-V, --version"),
+            "help message should document -V/--version flag"
+        );
     }
 }
