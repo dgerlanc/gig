@@ -1,10 +1,15 @@
 use include_dir::{include_dir, Dir};
 use std::collections::HashMap;
-use std::fs;
-use std::path::Path;
+use std::fs::OpenOptions;
+use std::io::{ErrorKind, Write};
 use std::process;
+use std::sync::LazyLock;
+
+const DEFAULT_OUTPUT: &str = ".gitignore";
+const GITIGNORE_SUFFIX: &str = ".gitignore";
 
 static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
+static INDEX: LazyLock<HashMap<String, &'static str>> = LazyLock::new(build_index);
 
 fn main() {
     let mut args = pico_args::Arguments::from_env();
@@ -15,8 +20,8 @@ fn main() {
         process::exit(0);
     }
 
-    // Handle --list / -ls
-    if args.contains("--list") || args.contains("-ls") {
+    // Handle --list
+    if args.contains("--list") {
         if let Err(e) = list_languages() {
             eprintln!("error: {e}");
             process::exit(1);
@@ -61,33 +66,27 @@ fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, String), Strin
     let output = args
         .opt_free_from_str()
         .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| ".gitignore".to_string());
+        .unwrap_or_else(|| DEFAULT_OUTPUT.to_string());
 
     Ok((lang, output))
 }
 
 /// Build an index mapping lowercase language names to their template content.
 fn build_index() -> HashMap<String, &'static str> {
-    let mut index = HashMap::new();
-
-    for file in TEMPLATES.files() {
-        let path = file.path();
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.ends_with(".gitignore") && name != ".gitignore" {
-                let lang = name.trim_end_matches(".gitignore");
-                if let Some(content) = file.contents_utf8() {
-                    index.insert(lang.to_lowercase(), content);
-                }
-            }
-        }
-    }
-
-    index
+    TEMPLATES
+        .files()
+        .filter_map(|file| {
+            let name = file.path().file_name()?.to_str()?;
+            let lang = name.strip_suffix(GITIGNORE_SUFFIX).filter(|s| !s.is_empty())?;
+            let content = file.contents_utf8()?;
+            Some((lang.to_lowercase(), content))
+        })
+        .collect()
 }
 
 /// Get template content for a language with case-insensitive and prefix matching.
 fn get_template(lang: &str) -> Result<&'static str, String> {
-    let index = build_index();
+    let index = &*INDEX;
     let key = lang.to_lowercase();
 
     // Exact match
@@ -98,12 +97,12 @@ fn get_template(lang: &str) -> Result<&'static str, String> {
     // Prefix match
     let matches: Vec<&String> = index.keys().filter(|k| k.starts_with(&key)).collect();
 
-    match matches.len() {
-        0 => Err(format!("no template found for language \"{lang}\"")),
-        1 => Ok(index.get(matches[0]).unwrap()),
-        _ => {
-            let mut sorted: Vec<_> = matches.iter().map(|s| s.as_str()).collect();
-            sorted.sort();
+    match matches.as_slice() {
+        [] => Err(format!("no template found for language \"{lang}\"")),
+        [single] => Ok(index[*single]),
+        multiple => {
+            let mut sorted: Vec<_> = multiple.iter().map(|s| s.as_str()).collect();
+            sorted.sort_unstable();
             Err(format!(
                 "ambiguous language \"{}\"; matches: {}",
                 lang,
@@ -115,7 +114,7 @@ fn get_template(lang: &str) -> Result<&'static str, String> {
 
 /// List all available languages.
 fn list_languages() -> Result<(), String> {
-    let index = build_index();
+    let index = &*INDEX;
 
     if index.is_empty() {
         return Err(
@@ -124,7 +123,7 @@ fn list_languages() -> Result<(), String> {
     }
 
     let mut langs: Vec<_> = index.keys().collect();
-    langs.sort();
+    langs.sort_unstable();
 
     println!("Available languages ({}):\n", langs.len());
     for lang in langs {
@@ -136,16 +135,22 @@ fn list_languages() -> Result<(), String> {
 
 /// Write content to a file, refusing to overwrite existing files.
 fn write_output(path: &str, content: &str) -> Result<(), String> {
-    if Path::new(path).exists() {
-        return Err(format!(
-            "file {path} already exists; remove it first or choose a different path"
-        ));
-    }
-    fs::write(path, content).map_err(|e| e.to_string())
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| {
+            if e.kind() == ErrorKind::AlreadyExists {
+                format!("file {path} already exists; remove it first or choose a different path")
+            } else {
+                e.to_string()
+            }
+        })?;
+    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
 }
 
 fn print_usage() {
-    print!(
+    println!(
         r#"gig - generate .gitignore files from GitHub's template collection
 
 Usage:
@@ -156,7 +161,7 @@ Arguments:
 
 Flags:
   -l, --lang     Language template to use (required)
-  --list, -ls    List all available language templates
+  --list         List all available language templates
   -h, --help     Show this help message
 
 Examples:
@@ -164,8 +169,7 @@ Examples:
   gig -l go .gitignore           Same as above, explicit output path
   gig -l rust src/.gitignore     Create .gitignore for Rust in src/
 
-Templates are sourced from https://github.com/github/gitignore
-"#
+Templates are sourced from https://github.com/github/gitignore"#
     );
 }
 
@@ -184,8 +188,16 @@ mod tests {
     #[test]
     fn test_build_index_has_templates() {
         let index = build_index();
-        // Should have templates if they're embedded
-        if !TEMPLATES.files().next().is_none() {
+        // Should have templates if valid template files are embedded
+        // (files ending in .gitignore that aren't just ".gitignore")
+        let has_valid_templates = TEMPLATES.files().any(|f| {
+            f.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|name| name.strip_suffix(GITIGNORE_SUFFIX))
+                .is_some_and(|lang| !lang.is_empty())
+        });
+        if has_valid_templates {
             assert!(!index.is_empty(), "index should not be empty when templates exist");
         }
     }
