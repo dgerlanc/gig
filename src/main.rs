@@ -22,10 +22,7 @@ fn main() {
 
     // Handle --list
     if args.contains("--list") {
-        if let Err(e) = list_languages() {
-            eprintln!("error: {e}");
-            process::exit(1);
-        }
+        list_languages();
         process::exit(0);
     }
 
@@ -113,15 +110,8 @@ fn get_template(lang: &str) -> Result<&'static str, String> {
 }
 
 /// List all available languages.
-fn list_languages() -> Result<(), String> {
+fn list_languages() {
     let index = &*INDEX;
-
-    if index.is_empty() {
-        return Err(
-            "no templates embedded. Please contact the project maintainers".to_string(),
-        );
-    }
-
     let mut langs: Vec<_> = index.keys().collect();
     langs.sort_unstable();
 
@@ -129,8 +119,6 @@ fn list_languages() -> Result<(), String> {
     for lang in langs {
         println!("  {lang}");
     }
-
-    Ok(())
 }
 
 /// Write content to a file, refusing to overwrite existing files.
@@ -188,18 +176,7 @@ mod tests {
     #[test]
     fn test_build_index_has_templates() {
         let index = build_index();
-        // Should have templates if valid template files are embedded
-        // (files ending in .gitignore that aren't just ".gitignore")
-        let has_valid_templates = TEMPLATES.files().any(|f| {
-            f.path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .and_then(|name| name.strip_suffix(GITIGNORE_SUFFIX))
-                .is_some_and(|lang| !lang.is_empty())
-        });
-        if has_valid_templates {
-            assert!(!index.is_empty(), "index should not be empty when templates exist");
-        }
+        assert!(!index.is_empty(), "index should contain embedded templates");
     }
 
     #[test]
@@ -212,34 +189,25 @@ mod tests {
 
     #[test]
     fn test_get_template_exact_match() {
-        let index = build_index();
-        if index.contains_key("python") {
-            let result = get_template("python");
-            assert!(result.is_ok(), "should find python template");
-        }
+        let result = get_template("python");
+        assert!(result.is_ok(), "should find python template");
     }
 
     #[test]
     fn test_get_template_case_insensitive() {
-        let index = build_index();
-        if index.contains_key("python") {
-            let lower = get_template("python").unwrap();
-            let upper = get_template("Python").unwrap();
-            let mixed = get_template("PYTHON").unwrap();
+        let lower = get_template("python").unwrap();
+        let upper = get_template("Python").unwrap();
+        let mixed = get_template("PYTHON").unwrap();
 
-            assert_eq!(lower, upper);
-            assert_eq!(lower, mixed);
-        }
+        assert_eq!(lower, upper);
+        assert_eq!(lower, mixed);
     }
 
     #[test]
     fn test_get_template_prefix_match() {
-        let index = build_index();
-        // "py" should match "python" if it's the only match starting with "py"
-        if index.contains_key("python") && !index.keys().any(|k| k != "python" && k.starts_with("py")) {
-            let result = get_template("py");
-            assert!(result.is_ok(), "prefix 'py' should match python");
-        }
+        // "pyth" should uniquely match "python"
+        let result = get_template("pyth");
+        assert!(result.is_ok(), "prefix 'pyth' should match python");
     }
 
     #[test]
