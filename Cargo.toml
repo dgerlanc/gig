@@ -1,0 +1,9 @@
+[package]
+name = "gig"
+version = "0.1.0"
+edition = "2021"
+description = "Generate .gitignore files from GitHub's template collection"
+
+[dependencies]
+pico-args = "0.5"
+include_dir = "0.7"
