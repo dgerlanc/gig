@@ -13,7 +13,7 @@ cargo build              # Build debug binary
 cargo build --release    # Build release binary
 cargo test               # Run all tests
 cargo test <test_name>   # Run a single test (e.g., cargo test test_get_template_exact_match)
-cargo run -- -l python   # Run with arguments
+cargo run -- python      # Run with arguments
 ```
 
 ## Architecture
@@ -33,9 +33,12 @@ Key functions:
 ## CLI Usage
 
 ```bash
-gig -l <language> [output]   # Generate .gitignore (output defaults to .gitignore)
-gig --list                   # List available templates
-gig --help                   # Show help
+gig <languages> [output]      # Generate .gitignore (output defaults to .gitignore)
+gig python                    # Single language
+gig go,godot,node             # Multiple languages, comma-separated
+gig --list                    # List available templates
+gig --help                    # Show help
+gig --version                 # Show version
 ```
 
 ## Dependencies
