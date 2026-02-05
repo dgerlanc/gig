@@ -8,26 +8,26 @@ use std::sync::LazyLock;
 
 const DEFAULT_OUTPUT: &str = ".gitignore";
 const GITIGNORE_SUFFIX: &str = ".gitignore";
-const LANG_REQUIRED_ERR: &str = "language is required (e.g., gig -l python)";
+const LANG_REQUIRED_ERR: &str = "languages required (e.g., gig python or gig go,godot,node)";
 
 const HELP_MSG: &str = r#"gig - generate .gitignore files from GitHub's template collection
 
 Usage:
-  gig -l <language> [output]
+  gig <languages> [output]
 
 Arguments:
-  output    Path to write the .gitignore file (default: .gitignore)
+  languages  Comma-separated list of language/tool templates (e.g., python or go,godot,node)
+  output     Path to write the .gitignore file (default: .gitignore)
 
 Flags:
-  -l, --lang     Language template to use (required)
   --list         List all available language templates
   -h, --help     Show this help message
   -V, --version  Show version information
 
 Examples:
-  gig -l python                  Create .gitignore for Python in current directory
-  gig -l go .gitignore           Same as above, explicit output path
-  gig -l rust src/.gitignore     Create .gitignore for Rust in src/
+  gig python                   Create .gitignore for Python
+  gig go,godot,node            Create .gitignore for Go + Godot + Node
+  gig rust src/.gitignore      Create .gitignore for Rust in src/
 
 Templates are sourced from https://github.com/github/gitignore"#;
 
@@ -55,8 +55,8 @@ fn main() {
         process::exit(0);
     }
 
-    // Parse -l/--lang and output path
-    let (lang, output) = match parse_args(&mut args) {
+    // Parse languages and output path
+    let (languages, output) = match parse_args(&mut args) {
         Ok((l, o)) => (l, o),
         Err(e) => {
             eprintln!("error: {e}");
@@ -64,18 +64,22 @@ fn main() {
         }
     };
 
-    // Get template content
-    let content = match get_template(&lang) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("error: {e}");
-            eprintln!("\nRun 'gig --list' to see available languages.");
-            process::exit(1);
+    // Get template content for each language
+    let mut templates: Vec<&str> = Vec::new();
+    for lang in &languages {
+        match get_template(lang) {
+            Ok(c) => templates.push(c),
+            Err(e) => {
+                eprintln!("error: {e}");
+                eprintln!("\nRun 'gig --list' to see available languages.");
+                process::exit(1);
+            }
         }
-    };
+    }
 
-    // Write output
-    if let Err(e) = write_output(&output, content) {
+    // Merge templates and write output
+    let content = merge_templates(&templates);
+    if let Err(e) = write_output(&output, &content) {
         eprintln!("error: {e}");
         process::exit(1);
     }
@@ -122,20 +126,22 @@ fn merge_templates(templates: &[&str]) -> String {
     output
 }
 
-fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, PathBuf), String> {
-    let lang: Option<String> = args
-        .opt_value_from_str(["-l", "--lang"])
-        .map_err(|_| LANG_REQUIRED_ERR)?;
+fn parse_args(args: &mut pico_args::Arguments) -> Result<(Vec<String>, PathBuf), String> {
+    // First positional: languages (required)
+    let languages_arg: Option<String> = args
+        .opt_free_from_str()
+        .map_err(|e| e.to_string())?;
 
-    let lang = lang.ok_or(LANG_REQUIRED_ERR)?;
+    let languages_str = languages_arg.ok_or(LANG_REQUIRED_ERR)?;
+    let languages = parse_languages(&languages_str)?;
 
-    // Get positional argument (output path), default to .gitignore
+    // Second positional: output path (optional)
     let output: PathBuf = args
         .opt_free_from_str()
         .map_err(|e| e.to_string())?
         .unwrap_or_else(|| PathBuf::from(DEFAULT_OUTPUT));
 
-    Ok((lang, output))
+    Ok((languages, output))
 }
 
 /// Build an index mapping lowercase language names to their template content.
@@ -339,53 +345,48 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_args_with_lang() {
-        let mut args = pico_args::Arguments::from_vec(vec!["-l".into(), "python".into()]);
+    fn test_parse_args_single_language() {
+        let mut args = pico_args::Arguments::from_vec(vec!["python".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_ok());
-        let (lang, output) = result.unwrap();
-        assert_eq!(lang, "python");
+        let (langs, output) = result.unwrap();
+        assert_eq!(langs, vec!["python".to_string()]);
         assert_eq!(output, PathBuf::from(".gitignore"));
     }
 
     #[test]
-    fn test_parse_args_with_lang_and_output() {
-        let mut args = pico_args::Arguments::from_vec(vec![
-            "-l".into(),
-            "rust".into(),
-            "custom.gitignore".into(),
-        ]);
+    fn test_parse_args_multiple_languages() {
+        let mut args = pico_args::Arguments::from_vec(vec!["go,godot,emacs".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_ok());
-        let (lang, output) = result.unwrap();
-        assert_eq!(lang, "rust");
+        let (langs, output) = result.unwrap();
+        assert_eq!(langs, vec!["go".to_string(), "godot".to_string(), "emacs".to_string()]);
+        assert_eq!(output, PathBuf::from(".gitignore"));
+    }
+
+    #[test]
+    fn test_parse_args_with_output_path() {
+        let mut args = pico_args::Arguments::from_vec(vec!["rust".into(), "custom.gitignore".into()]);
+        let result = parse_args(&mut args);
+        assert!(result.is_ok());
+        let (langs, output) = result.unwrap();
+        assert_eq!(langs, vec!["rust".to_string()]);
         assert_eq!(output, PathBuf::from("custom.gitignore"));
     }
 
     #[test]
-    fn test_parse_args_long_flag() {
-        let mut args = pico_args::Arguments::from_vec(vec!["--lang".into(), "go".into()]);
-        let result = parse_args(&mut args);
-        assert!(result.is_ok());
-        let (lang, _) = result.unwrap();
-        assert_eq!(lang, "go");
-    }
-
-    #[test]
-    fn test_parse_args_missing_lang() {
+    fn test_parse_args_missing_languages() {
         let mut args = pico_args::Arguments::from_vec(vec![]);
         let result = parse_args(&mut args);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), LANG_REQUIRED_ERR);
     }
 
     #[test]
-    fn test_parse_args_lang_flag_without_value() {
-        // Simulates `gig -l` without a language value
-        let mut args = pico_args::Arguments::from_vec(vec!["-l".into()]);
+    fn test_parse_args_empty_language_in_list() {
+        let mut args = pico_args::Arguments::from_vec(vec!["go,,godot".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), LANG_REQUIRED_ERR);
+        assert!(result.unwrap_err().contains("empty language"));
     }
 
     #[test]
