@@ -52,7 +52,7 @@ echo "Running cargo check..."
 cargo check --quiet
 
 # Commit
-git add Cargo.toml
+git add Cargo.toml Cargo.lock
 git commit -m "Release v$VERSION"
 
 # Tag
