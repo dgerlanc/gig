@@ -291,11 +291,7 @@ mod tests {
         for (prefix, matches) in prefix_matches {
             if matches.len() > 1 && !index.contains_key(&prefix) {
                 let result = get_template(&prefix);
-                assert!(
-                    result.is_err(),
-                    "should be ambiguous for prefix '{}'",
-                    prefix
-                );
+                assert!(result.is_err(), "should be ambiguous for prefix '{prefix}'");
                 assert!(
                     result.unwrap_err().contains("ambiguous"),
                     "error should mention ambiguous"
