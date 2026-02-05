@@ -81,6 +81,20 @@ fn main() {
     }
 }
 
+/// Parse comma-separated language list, validating no empty segments.
+fn parse_languages(input: &str) -> Result<Vec<String>, String> {
+    let languages: Vec<String> = input
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    if languages.iter().any(|s| s.is_empty()) {
+        return Err("empty language in list".to_string());
+    }
+
+    Ok(languages)
+}
+
 fn parse_args(args: &mut pico_args::Arguments) -> Result<(String, PathBuf), String> {
     let lang: Option<String> = args
         .opt_value_from_str(["-l", "--lang"])
@@ -364,5 +378,30 @@ mod tests {
             HELP_MSG.contains("-V, --version"),
             "help message should document -V/--version flag"
         );
+    }
+
+    #[test]
+    fn test_parse_languages_single() {
+        let result = parse_languages("python");
+        assert_eq!(result, Ok(vec!["python".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_languages_multiple() {
+        let result = parse_languages("go,godot,emacs");
+        assert_eq!(result, Ok(vec!["go".to_string(), "godot".to_string(), "emacs".to_string()]));
+    }
+
+    #[test]
+    fn test_parse_languages_empty_segment() {
+        let result = parse_languages("go,,godot");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("empty language"));
+    }
+
+    #[test]
+    fn test_parse_languages_whitespace_trimmed() {
+        let result = parse_languages(" go , godot ");
+        assert_eq!(result, Ok(vec!["go".to_string(), "godot".to_string()]));
     }
 }
