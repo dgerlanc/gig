@@ -117,9 +117,8 @@ fn list_languages() {
     let mut langs: Vec<_> = index.keys().collect();
     langs.sort_unstable();
 
-    println!("Available languages ({}):\n", langs.len());
     for lang in langs {
-        println!("  {lang}");
+        println!("{lang}");
     }
 }
 
@@ -167,7 +166,6 @@ Templates are sourced from https://github.com/github/gitignore"#
 mod tests {
     use super::*;
     use std::fs;
-    use std::path::PathBuf;
 
     fn test_dir() -> PathBuf {
         let dir = std::env::temp_dir().join(format!("gig_test_{}", std::process::id()));
@@ -246,7 +244,7 @@ mod tests {
                 return;
             }
         }
-        // If we get here, no ambiguous prefix was found - skip the test
+        panic!("No ambiguous prefix found in templates - test needs updating");
     }
 
     #[test]
