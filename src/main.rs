@@ -1,4 +1,4 @@
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{ErrorKind, Write};
@@ -76,7 +76,9 @@ fn build_index() -> HashMap<String, &'static str> {
         .files()
         .filter_map(|file| {
             let name = file.path().file_name()?.to_str()?;
-            let lang = name.strip_suffix(GITIGNORE_SUFFIX).filter(|s| !s.is_empty())?;
+            let lang = name
+                .strip_suffix(GITIGNORE_SUFFIX)
+                .filter(|s| !s.is_empty())?;
             let content = file.contents_utf8()?;
             Some((lang.to_lowercase(), content))
         })
@@ -130,12 +132,16 @@ fn write_output(path: &Path, content: &str) -> Result<(), String> {
         .open(path)
         .map_err(|e| {
             if e.kind() == ErrorKind::AlreadyExists {
-                format!("file {} already exists; remove it first or choose a different path", path.display())
+                format!(
+                    "file {} already exists; remove it first or choose a different path",
+                    path.display()
+                )
             } else {
                 e.to_string()
             }
         })?;
-    file.write_all(content.as_bytes()).map_err(|e| e.to_string())
+    file.write_all(content.as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 fn print_usage() {
@@ -236,7 +242,11 @@ mod tests {
         for (prefix, matches) in prefix_matches {
             if matches.len() > 1 && !index.contains_key(&prefix) {
                 let result = get_template(&prefix);
-                assert!(result.is_err(), "should be ambiguous for prefix '{}'", prefix);
+                assert!(
+                    result.is_err(),
+                    "should be ambiguous for prefix '{}'",
+                    prefix
+                );
                 assert!(
                     result.unwrap_err().contains("ambiguous"),
                     "error should mention ambiguous"
@@ -282,10 +292,7 @@ mod tests {
 
     #[test]
     fn test_parse_args_with_lang() {
-        let mut args = pico_args::Arguments::from_vec(vec![
-            "-l".into(),
-            "python".into(),
-        ]);
+        let mut args = pico_args::Arguments::from_vec(vec!["-l".into(), "python".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_ok());
         let (lang, output) = result.unwrap();
@@ -309,10 +316,7 @@ mod tests {
 
     #[test]
     fn test_parse_args_long_flag() {
-        let mut args = pico_args::Arguments::from_vec(vec![
-            "--lang".into(),
-            "go".into(),
-        ]);
+        let mut args = pico_args::Arguments::from_vec(vec!["--lang".into(), "go".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_ok());
         let (lang, _) = result.unwrap();
