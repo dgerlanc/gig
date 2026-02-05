@@ -87,10 +87,7 @@ fn main() {
 
 /// Parse comma-separated language list, validating no empty segments.
 fn parse_languages(input: &str) -> Result<Vec<String>, String> {
-    let languages: Vec<String> = input
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .collect();
+    let languages: Vec<String> = input.split(',').map(|s| s.trim().to_string()).collect();
 
     if languages.iter().any(|s| s.is_empty()) {
         return Err("empty language in list".to_string());
@@ -128,9 +125,7 @@ fn merge_templates(templates: &[&str]) -> String {
 
 fn parse_args(args: &mut pico_args::Arguments) -> Result<(Vec<String>, PathBuf), String> {
     // First positional: languages (required)
-    let languages_arg: Option<String> = args
-        .opt_free_from_str()
-        .map_err(|e| e.to_string())?;
+    let languages_arg: Option<String> = args.opt_free_from_str().map_err(|e| e.to_string())?;
 
     let languages_str = languages_arg.ok_or(LANG_REQUIRED_ERR)?;
     let languages = parse_languages(&languages_str)?;
@@ -360,13 +355,17 @@ mod tests {
         let result = parse_args(&mut args);
         assert!(result.is_ok());
         let (langs, output) = result.unwrap();
-        assert_eq!(langs, vec!["go".to_string(), "godot".to_string(), "emacs".to_string()]);
+        assert_eq!(
+            langs,
+            vec!["go".to_string(), "godot".to_string(), "emacs".to_string()]
+        );
         assert_eq!(output, PathBuf::from(".gitignore"));
     }
 
     #[test]
     fn test_parse_args_with_output_path() {
-        let mut args = pico_args::Arguments::from_vec(vec!["rust".into(), "custom.gitignore".into()]);
+        let mut args =
+            pico_args::Arguments::from_vec(vec!["rust".into(), "custom.gitignore".into()]);
         let result = parse_args(&mut args);
         assert!(result.is_ok());
         let (langs, output) = result.unwrap();
@@ -417,7 +416,14 @@ mod tests {
     #[test]
     fn test_parse_languages_multiple() {
         let result = parse_languages("go,godot,emacs");
-        assert_eq!(result, Ok(vec!["go".to_string(), "godot".to_string(), "emacs".to_string()]));
+        assert_eq!(
+            result,
+            Ok(vec![
+                "go".to_string(),
+                "godot".to_string(),
+                "emacs".to_string()
+            ])
+        );
     }
 
     #[test]
@@ -478,10 +484,16 @@ mod tests {
         let merged = merge_templates(&[go, rust]);
 
         // Verify merged content contains patterns from both
-        assert!(merged.contains("*.exe"), "should contain Go's *.exe pattern");
+        assert!(
+            merged.contains("*.exe"),
+            "should contain Go's *.exe pattern"
+        );
 
         // Count occurrences of *.exe - should only appear once
         let exe_count = merged.lines().filter(|l| l.trim() == "*.exe").count();
-        assert_eq!(exe_count, 1, "*.exe should only appear once after deduplication");
+        assert_eq!(
+            exe_count, 1,
+            "*.exe should only appear once after deduplication"
+        );
     }
 }
