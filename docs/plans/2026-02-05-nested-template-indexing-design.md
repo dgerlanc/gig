@@ -15,68 +15,37 @@ Three name collisions exist across directories:
 
 ## Design Decisions
 
-- **Hybrid namespace**: Flat by default (bare name), path-based for disambiguation
-- **Priority order for collisions**: top-level (0) > community (1) > Global (2)
-- **`--list` output**: Flat sorted list, path-qualified only for collisions
+- **Build-time flattening**: A `build.rs` script copies all templates into a flat
+  `$OUT_DIR/templates/` directory before compilation
+- **Collision handling**: Top-level keeps its name; nested collisions get prefixed
+  with their parent directory (e.g., `Global-AL.gitignore`, `CFML-ColdBox.gitignore`)
 - **No prefix matching**: Removed entirely to simplify lookup
+- **Minimal Rust changes**: `build_index()` stays unchanged (flat directory scan)
 
-## Index Structure
+## Approach
 
-Same type as today: `HashMap<String, &'static str>`.
+### `build.rs` (new)
 
-For every `.gitignore` file found recursively, compute:
-- **path_key**: Relative path from `templates/`, lowercased, `.gitignore` stripped.
-  E.g., `community/javascript/vue`, `global/macos`, `python`.
-- **bare_name**: Filename only, lowercased, `.gitignore` stripped.
-  E.g., `vue`, `macos`, `python`.
+Walks `templates/` recursively at build time:
+1. Collects all `.gitignore` files with their paths and bare names
+2. Groups by bare name to detect collisions
+3. Unique names: copied as-is
+4. Collisions: top-level keeps its name, nested get prefixed with parent dir name
+5. Fails the build on secondary collisions (after prefixing)
+6. Copies all files to `$OUT_DIR/templates/`
 
-Insertion rules:
-1. Every template gets its **path_key** inserted (always).
-2. If a bare name is unique across all templates, it gets inserted as a shortcut.
-3. If there's a collision, the highest-priority template wins the bare name key,
-   but only if exactly one template exists at that priority level.
-4. If multiple templates collide at the same priority (like `ColdBox`), none gets
-   a bare name key.
+### `src/main.rs` changes
 
-Result for current collisions:
-- `AL` -> keys: `al` (top-level wins), `global/al`
-- `Racket` -> keys: `racket` (top-level wins), `community/racket`
-- `ColdBox` -> keys: `community/cfml/coldbox`, `community/boxlang/coldbox` (no bare key)
+- `include_dir!` path changes from `$CARGO_MANIFEST_DIR/templates` to `$OUT_DIR/templates`
+- `get_template()` simplified to exact-match only (prefix matching removed)
+- `build_index()` unchanged
+- `list_languages()` refactored for testability
 
-## Lookup Behavior
+### Result for current collisions
 
-`get_template()` becomes:
-
-1. **Exact match** on the index key -- handles `gig python`, `gig global/al`, etc.
-2. **Miss** -- check a collision map (`bare_name -> Vec<path_key>`) to distinguish:
-   - Collision: `ambiguous template "coldbox"; specify one of: community/boxlang/coldbox, community/cfml/coldbox`
-   - Genuinely missing: `no template found for language "foo"`
-
-## `--list` Output
-
-Print the **shortest usable key** for each template:
-
-1. Iterate over all path keys (one per actual template file).
-2. If a bare name shortcut exists in the index for that template, print the bare name.
-3. Otherwise, print the path key.
-
-Produces a clean deduplicated list:
-```
-actionscript
-ada
-al
-altiumdesigner
-...
-community/boxlang/coldbox
-community/cfml/coldbox
-...
-global/al
-...
-vue
-```
-
-Requires a `HashSet<String>` of all path keys to distinguish path keys from bare
-name shortcuts during iteration.
+- `AL` -> `al` (top-level wins), `global-al` (prefixed)
+- `Racket` -> `racket` (top-level wins), `community-racket` (prefixed)
+- `ColdBox` -> `cfml-coldbox` and `boxlang-coldbox` (both prefixed, no bare name)
 
 ## Testing
 
@@ -85,19 +54,10 @@ Remove existing prefix-matching tests (`test_get_template_prefix_match`,
 
 ### New tests
 
-**Index building:**
-- `test_build_index_includes_nested_templates` -- index size > top-level count
-- `test_build_index_has_path_keys` -- `global/macos`, `community/javascript/vue` exist
-- `test_build_index_bare_name_for_unique_nested` -- `vue` exists as a key
-- `test_build_index_no_bare_name_for_same_priority_collision` -- `coldbox` does NOT exist
-
-**Lookup:**
-- `test_get_template_path_key_lookup` -- `get_template("global/al")` succeeds
-- `test_get_template_bare_name_shortcut` -- `get_template("vue")` succeeds
-- `test_get_template_collision_priority` -- `get_template("al")` returns top-level content
-- `test_get_template_collision_same_priority_error` -- `get_template("coldbox")` errors with both paths
-- `test_get_template_not_found_error` -- `get_template("nonexistent")` returns "no template found"
-
-**List:**
-- `test_list_no_duplicates` -- no duplicate entries
-- `test_list_shows_shortest_key` -- `vue` appears, `community/boxlang/coldbox` appears
+- `test_build_index_includes_nested_templates` -- index size > 200
+- `test_collision_top_level_wins` -- `al` returns top-level, `global-al` returns Global
+- `test_collision_same_priority_both_prefixed` -- `cfml-coldbox` and `boxlang-coldbox` work
+- `test_unique_nested_template_bare_name` -- `vue` accessible by bare name
+- `test_nested_template_content_not_empty` -- spot-check content
+- `test_list_no_duplicates` -- no duplicate entries in --list
+- `test_list_includes_nested_templates` -- nested templates appear in --list
