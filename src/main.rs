@@ -25,13 +25,15 @@ Flags:
   -V, --version  Show version information
 
 Examples:
-  gig python                   Create .gitignore for Python
-  gig go,godot,node            Create .gitignore for Go + Godot + Node
-  gig rust src/.gitignore      Create .gitignore for Rust in src/
+  gig python                          Create .gitignore for Python
+  gig go,godot,node                   Create .gitignore for Go + Godot + Node
+  gig rust src/.gitignore             Create .gitignore for Rust in src/
+  gig python,global.macos             Python + macOS global ignores
+  gig rust,community.golang.hugo      Rust + Hugo community template
 
 Templates are sourced from https://github.com/github/gitignore"#;
 
-static TEMPLATES: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/templates");
+static TEMPLATES: Dir<'_> = include_dir!("$OUT_DIR/templates");
 static INDEX: LazyLock<HashMap<String, &'static str>> = LazyLock::new(build_index);
 
 fn main() {
@@ -154,41 +156,28 @@ fn build_index() -> HashMap<String, &'static str> {
         .collect()
 }
 
-/// Get template content for a language with case-insensitive and prefix matching.
+/// Get template content for a language (case-insensitive exact match).
 fn get_template(lang: &str) -> Result<&'static str, String> {
     let index = &*INDEX;
     let key = lang.to_lowercase();
 
-    // Exact match
-    if let Some(content) = index.get(&key) {
-        return Ok(content);
-    }
+    index
+        .get(&key)
+        .copied()
+        .ok_or_else(|| format!("no template found for language \"{lang}\""))
+}
 
-    // Prefix match
-    let matches: Vec<&String> = index.keys().filter(|k| k.starts_with(&key)).collect();
-
-    match matches.as_slice() {
-        [] => Err(format!("no template found for language \"{lang}\"")),
-        [single] => Ok(index[*single]),
-        multiple => {
-            let mut sorted: Vec<_> = multiple.iter().map(|s| s.as_str()).collect();
-            sorted.sort_unstable();
-            Err(format!(
-                "ambiguous language \"{}\"; matches: {}",
-                lang,
-                sorted.join(", ")
-            ))
-        }
-    }
+/// Get the sorted list of available template keys.
+fn get_language_list() -> Vec<String> {
+    let index = &*INDEX;
+    let mut langs: Vec<_> = index.keys().cloned().collect();
+    langs.sort_unstable();
+    langs
 }
 
 /// List all available languages.
 fn list_languages() {
-    let index = &*INDEX;
-    let mut langs: Vec<_> = index.keys().collect();
-    langs.sort_unstable();
-
-    for lang in langs {
+    for lang in get_language_list() {
         println!("{lang}");
     }
 }
@@ -259,47 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn test_get_template_prefix_match() {
-        // "pyth" should uniquely match "python"
-        let result = get_template("pyth");
-        assert!(result.is_ok(), "prefix 'pyth' should match python");
-    }
-
-    #[test]
     fn test_get_template_not_found() {
         let result = get_template("nonexistentlanguage12345");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("no template found"));
-    }
-
-    #[test]
-    fn test_get_template_ambiguous() {
-        let index = build_index();
-        // Find a prefix that matches multiple templates but isn't an exact match itself
-        let mut prefix_matches: HashMap<String, Vec<String>> = HashMap::new();
-        for key in index.keys() {
-            if key.len() >= 2 {
-                let prefix = &key[..2];
-                prefix_matches
-                    .entry(prefix.to_string())
-                    .or_default()
-                    .push(key.clone());
-            }
-        }
-
-        // Find an ambiguous prefix (one that matches multiple and isn't an exact key)
-        for (prefix, matches) in prefix_matches {
-            if matches.len() > 1 && !index.contains_key(&prefix) {
-                let result = get_template(&prefix);
-                assert!(result.is_err(), "should be ambiguous for prefix '{prefix}'");
-                assert!(
-                    result.unwrap_err().contains("ambiguous"),
-                    "error should mention ambiguous"
-                );
-                return;
-            }
-        }
-        panic!("No ambiguous prefix found in templates - test needs updating");
     }
 
     #[test]
@@ -472,6 +424,17 @@ mod tests {
     }
 
     #[test]
+    fn test_build_index_includes_nested_templates() {
+        let index = build_index();
+        // With flattened nested templates, we should have many more than top-level only
+        assert!(
+            index.len() > 200,
+            "index should include nested templates, got {} entries",
+            index.len()
+        );
+    }
+
+    #[test]
     fn test_multi_language_deduplication() {
         // Get two templates that likely share some patterns
         let go = get_template("go").unwrap();
@@ -490,6 +453,90 @@ mod tests {
         assert_eq!(
             exe_count, 1,
             "*.exe should only appear once after deduplication"
+        );
+    }
+
+    #[test]
+    fn test_global_prefix() {
+        // AL exists at top-level and Global. Both should be accessible with distinct names.
+        let result = get_template("al");
+        assert!(
+            result.is_ok(),
+            "top-level 'al' should be accessible by bare name"
+        );
+
+        let result_prefixed = get_template("global.al");
+        assert!(
+            result_prefixed.is_ok(),
+            "Global/AL should be accessible as 'global.al'"
+        );
+
+        // They should be different templates
+        assert_ne!(
+            result.unwrap(),
+            result_prefixed.unwrap(),
+            "top-level AL and Global AL should have different content"
+        );
+    }
+
+    #[test]
+    fn test_community_prefix_with_subcategory() {
+        // ColdBox exists in community/CFML and community/BoxLang
+        // Both should be prefixed with community.{subcategory}
+        let cfml = get_template("community.cfml.coldbox");
+        assert!(
+            cfml.is_ok(),
+            "CFML/ColdBox should be accessible as 'community.cfml.coldbox'"
+        );
+
+        let boxlang = get_template("community.boxlang.coldbox");
+        assert!(
+            boxlang.is_ok(),
+            "BoxLang/ColdBox should be accessible as 'community.boxlang.coldbox'"
+        );
+    }
+
+    #[test]
+    fn test_community_template_access() {
+        // Vue is in community/JavaScript/, should be accessible with full prefix
+        let result = get_template("community.javascript.vue");
+        assert!(
+            result.is_ok(),
+            "community template 'vue' should be accessible as 'community.javascript.vue'"
+        );
+    }
+
+    #[test]
+    fn test_nested_template_content_not_empty() {
+        // Spot-check that nested templates have actual content
+        let vue = get_template("community.javascript.vue").unwrap();
+        assert!(!vue.is_empty(), "vue template should have content");
+
+        let macos = get_template("global.macos").unwrap();
+        assert!(!macos.is_empty(), "macos template should have content");
+    }
+
+    #[test]
+    fn test_list_no_duplicates() {
+        let list = get_language_list();
+        let unique: HashSet<&String> = list.iter().collect();
+        assert_eq!(list.len(), unique.len(), "list should have no duplicates");
+    }
+
+    #[test]
+    fn test_list_includes_nested_templates() {
+        let list = get_language_list();
+        assert!(
+            list.contains(&"community.javascript.vue".to_string()),
+            "list should include community template 'community.javascript.vue'"
+        );
+        assert!(
+            list.contains(&"global.macos".to_string()),
+            "list should include Global template 'global.macos'"
+        );
+        assert!(
+            list.contains(&"community.cfml.coldbox".to_string()),
+            "list should include community template 'community.cfml.coldbox'"
         );
     }
 }
