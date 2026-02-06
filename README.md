@@ -45,14 +45,14 @@ cargo install --path .
 gig python
 
 # Multiple languages, comma-separated
-gig go,godot,node
+gig go,nextjs,terraform
 
 # Specify an output path
 gig rust src/.gitignore
 
 # Use nested templates (Global/, community/)
-gig python,global.macos
-gig rust,community.golang.hugo
+gig global.macos
+gig go,community.golang.hugo
 
 # List all available languages
 gig --list
