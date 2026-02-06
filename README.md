@@ -1,3 +1,5 @@
+![gig logo](./logo.png)
+
 # gig
 
 A CLI tool that generates `.gitignore` files from [GitHub's gitignore template collection](https://github.com/github/gitignore). Templates are embedded directly in the binary, so it works offline after building.
