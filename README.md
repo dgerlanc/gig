@@ -6,7 +6,7 @@ A CLI tool that generates `.gitignore` files from [GitHub's gitignore template c
 
 ```sh
 cargo build --release
-./target/release/gig -l python
+./target/release/gig python
 ```
 
 ## Installation
@@ -42,13 +42,17 @@ cargo install --path .
 
 ```sh
 # Create .gitignore for Python in current directory
-gig -l python
+gig python
 
-# Same thing with long flag
-gig --lang python
+# Multiple languages, comma-separated
+gig go,godot,node
 
 # Specify an output path
-gig -l go src/.gitignore
+gig rust src/.gitignore
+
+# Use nested templates (Global/, community/)
+gig python,global.macos
+gig rust,community.golang.hugo
 
 # List all available languages
 gig --list
@@ -57,7 +61,16 @@ gig --list
 gig --help
 ```
 
-Language matching is case-insensitive, so `gig -l Python` and `gig -l python` both work. Prefix matching is also supported; `gig -l py` will match `python` if it's the only match.
+Language matching is case-insensitive, so `gig Python` and `gig python` both work.
+
+### Nested Templates
+
+Templates from GitHub's `Global/` and `community/` subdirectories are available using dot-notation:
+
+- **Global templates**: `global.<name>` (e.g., `global.macos`, `global.linux`)
+- **Community templates**: `community.<subcategory>.<name>` (e.g., `community.javascript.vue`, `community.cfml.coldbox`)
+
+Run `gig --list` to see all available template names.
 
 ## Updating Templates
 

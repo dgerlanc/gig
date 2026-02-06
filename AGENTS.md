@@ -18,28 +18,39 @@ cargo run -- python      # Run with arguments
 
 ## Architecture
 
-The entire application lives in `src/main.rs`:
+### Build step (`build.rs`)
+
+A build script flattens all templates (including nested ones from `Global/` and `community/` subdirectories) into `$OUT_DIR/templates/` before compilation. Nested templates get dot-prefixed filenames to avoid collisions (e.g., `Global/macOS.gitignore` becomes `global.macOS.gitignore`).
+
+### Runtime (`src/main.rs`)
 
 - **Template index**: Built lazily using `LazyLock<HashMap>` - maps lowercase language names to template content
-- **Template lookup**: Supports exact match (case-insensitive) with prefix matching fallback
+- **Template lookup**: Exact match only (case-insensitive). Nested templates use dot-notation (e.g., `global.macos`, `community.javascript.vue`)
+- **Template merging**: Multiple templates are merged with pattern deduplication
 - **File writing**: Uses `OpenOptions::create_new(true)` for atomic creation (won't overwrite existing files)
 
 Key functions:
 - `build_index()` - Builds the template HashMap from embedded files
-- `get_template()` - Looks up templates with exact/prefix matching
+- `get_template()` - Looks up templates with exact match (case-insensitive)
 - `parse_args()` - Handles CLI argument parsing with pico-args
+- `parse_languages()` - Parses comma-separated language list
+- `merge_templates()` - Merges multiple templates with deduplication
 - `write_output()` - Safe file creation
 
 ## CLI Usage
 
 ```bash
-gig <languages> [output]      # Generate .gitignore (output defaults to .gitignore)
-gig python                    # Single language
-gig go,godot,node             # Multiple languages, comma-separated
-gig --list                    # List available templates
-gig --help                    # Show help
-gig --version                 # Show version
+gig <languages> [output]           # Generate .gitignore (output defaults to .gitignore)
+gig python                         # Single language
+gig go,godot,node                  # Multiple languages, comma-separated
+gig python,global.macos            # Mix top-level and nested templates
+gig rust,community.golang.hugo     # Community template with subcategory
+gig --list                         # List available templates
+gig --help                         # Show help
+gig --version                      # Show version
 ```
+
+Nested templates use dot-notation: `global.<name>` for Global/ templates, `community.<subcategory>.<name>` for community/ templates.
 
 ## Dependencies
 
