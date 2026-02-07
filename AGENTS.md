@@ -27,7 +27,8 @@ A build script flattens all templates (including nested ones from `Global/` and 
 - **Template index**: Built lazily using `LazyLock<HashMap>` - maps lowercase language names to template content
 - **Template lookup**: Exact match only (case-insensitive). Nested templates use dot-notation (e.g., `global.macos`, `community.javascript.vue`)
 - **Template merging**: Multiple templates are merged with pattern deduplication
-- **File writing**: Uses `OpenOptions::create_new(true)` for atomic creation (won't overwrite existing files)
+- **Append mode**: `--append` reads the existing file, merges with new templates (deduplicating patterns), and overwrites
+- **File writing**: Default uses `create_new(true)` to avoid overwriting; `--append` uses `create(true).truncate(true)` to replace
 
 Key functions:
 - `build_index()` - Builds the template HashMap from embedded files
@@ -35,7 +36,8 @@ Key functions:
 - `parse_args()` - Handles CLI argument parsing with pico-args
 - `parse_languages()` - Parses comma-separated language list
 - `merge_templates()` - Merges multiple templates with deduplication
-- `write_output()` - Safe file creation
+- `write_output()` - Safe file creation (supports overwrite for append mode)
+- `read_existing_file()` - Reads existing file content for append mode
 
 ## CLI Usage
 
@@ -45,6 +47,7 @@ gig python                         # Single language
 gig go,godot,node                  # Multiple languages, comma-separated
 gig python,global.macos            # Mix top-level and nested templates
 gig rust,community.golang.hugo     # Community template with subcategory
+gig --append node                  # Append Node patterns to existing .gitignore
 gig --list                         # List available templates
 gig --help                         # Show help
 gig --version                      # Show version

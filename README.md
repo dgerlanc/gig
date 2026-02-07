@@ -52,6 +52,9 @@ gig go,nextjs,terraform
 # Specify an output path
 gig rust src/.gitignore
 
+# Append to an existing .gitignore, deduplicating patterns
+gig --append node
+
 # Use nested templates (Global/, community/)
 gig global.macos
 gig go,community.golang.hugo
