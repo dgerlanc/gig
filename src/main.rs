@@ -21,6 +21,7 @@ Arguments:
 
 Flags:
   --list         List all available language templates
+  --append       Append to existing file, deduplicating patterns
   -h, --help     Show this help message
   -V, --version  Show version information
 
@@ -30,6 +31,7 @@ Examples:
   gig rust src/.gitignore             Create .gitignore for Rust in src/
   gig python,global.macos             Python + macOS global ignores
   gig rust,community.golang.hugo      Rust + Hugo community template
+  gig --append node                   Add Node patterns to existing .gitignore
 
 Templates are sourced from https://github.com/github/gitignore"#;
 
@@ -57,6 +59,9 @@ fn main() {
         process::exit(0);
     }
 
+    // Handle --append
+    let append_mode = args.contains("--append");
+
     // Parse languages and output path
     let (languages, output) = match parse_args(&mut args) {
         Ok((l, o)) => (l, o),
@@ -64,6 +69,19 @@ fn main() {
             eprintln!("error: {e}");
             process::exit(1);
         }
+    };
+
+    // If appending, read the existing file content
+    let existing_content = if append_mode {
+        match read_existing_file(&output) {
+            Ok(content) => content,
+            Err(e) => {
+                eprintln!("error: {e}");
+                process::exit(1);
+            }
+        }
+    } else {
+        None
     };
 
     // Get template content for each language
@@ -79,9 +97,17 @@ fn main() {
         }
     }
 
-    // Merge templates and write output
-    let content = merge_templates(&templates);
-    if let Err(e) = write_output(&output, &content) {
+    // Merge templates (prepend existing content so its patterns win dedup)
+    let content = match &existing_content {
+        Some(existing) => {
+            let mut all_templates: Vec<&str> = vec![existing.as_str()];
+            all_templates.extend(templates);
+            merge_templates(&all_templates)
+        }
+        None => merge_templates(&templates),
+    };
+
+    if let Err(e) = write_output(&output, &content, append_mode) {
         eprintln!("error: {e}");
         process::exit(1);
     }
@@ -182,24 +208,36 @@ fn list_languages() {
     }
 }
 
-/// Write content to a file, refusing to overwrite existing files.
-fn write_output(path: &Path, content: &str) -> Result<(), String> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-        .map_err(|e| {
-            if e.kind() == ErrorKind::AlreadyExists {
-                format!(
-                    "file {} already exists; remove it first or choose a different path",
-                    path.display()
-                )
-            } else {
-                e.to_string()
-            }
-        })?;
+/// Write content to a file, refusing to overwrite unless allow_overwrite is true.
+fn write_output(path: &Path, content: &str, allow_overwrite: bool) -> Result<(), String> {
+    let mut opts = OpenOptions::new();
+    opts.write(true);
+    if allow_overwrite {
+        opts.create(true).truncate(true);
+    } else {
+        opts.create_new(true);
+    }
+    let mut file = opts.open(path).map_err(|e| {
+        if e.kind() == ErrorKind::AlreadyExists {
+            format!(
+                "file {} already exists; use --append to merge or remove it first",
+                path.display()
+            )
+        } else {
+            e.to_string()
+        }
+    })?;
     file.write_all(content.as_bytes())
         .map_err(|e| e.to_string())
+}
+
+/// Read existing file content, returning None if the file doesn't exist.
+fn read_existing_file(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("failed to read {}: {}", path.display(), e)),
+    }
 }
 
 fn print_usage() {
@@ -211,8 +249,8 @@ mod tests {
     use super::*;
     use std::fs;
 
-    fn test_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("gig_test_{}", std::process::id()));
+    fn unique_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("gig_test_{}_{name}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -256,10 +294,10 @@ mod tests {
 
     #[test]
     fn test_write_output_creates_file() {
-        let dir = test_dir();
+        let dir = unique_dir("creates_file");
         let path = dir.join("test.gitignore");
 
-        let result = write_output(&path, "# test content\n");
+        let result = write_output(&path, "# test content\n", false);
         assert!(result.is_ok());
         assert!(path.exists());
         assert_eq!(fs::read_to_string(&path).unwrap(), "# test content\n");
@@ -270,13 +308,13 @@ mod tests {
 
     #[test]
     fn test_write_output_refuses_overwrite() {
-        let dir = test_dir();
+        let dir = unique_dir("refuses_overwrite");
         let path = dir.join("existing.gitignore");
 
         // Create existing file
         fs::write(&path, "existing content").unwrap();
 
-        let result = write_output(&path, "new content");
+        let result = write_output(&path, "new content", false);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("already exists"));
 
@@ -538,5 +576,138 @@ mod tests {
             list.contains(&"community.cfml.coldbox".to_string()),
             "list should include community template 'community.cfml.coldbox'"
         );
+    }
+
+    #[test]
+    fn test_read_existing_file_returns_content() {
+        let dir = unique_dir("read_content");
+        let path = dir.join("existing.txt");
+        fs::write(&path, "hello\nworld\n").unwrap();
+
+        let result = read_existing_file(&path);
+        assert_eq!(result, Ok(Some("hello\nworld\n".to_string())));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_read_existing_file_returns_none_for_missing() {
+        let dir = unique_dir("read_missing");
+        let path = dir.join("nonexistent.txt");
+
+        let result = read_existing_file(&path);
+        assert_eq!(result, Ok(None));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_write_output_creates_file_with_overwrite() {
+        let dir = unique_dir("create_overwrite");
+        let path = dir.join("new_overwrite.gitignore");
+
+        let result = write_output(&path, "# content\n", true);
+        assert!(result.is_ok());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "# content\n");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_write_output_overwrites_with_flag() {
+        let dir = unique_dir("overwrites_flag");
+        let path = dir.join("overwrite.gitignore");
+        fs::write(&path, "old content").unwrap();
+
+        let result = write_output(&path, "new content", true);
+        assert!(result.is_ok());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "new content");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_write_output_still_refuses_without_flag() {
+        let dir = unique_dir("refuses_no_flag");
+        let path = dir.join("no_overwrite.gitignore");
+        fs::write(&path, "existing").unwrap();
+
+        let result = write_output(&path, "new content", false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("already exists"));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "existing");
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_append_deduplicates_with_existing() {
+        // Simulate: existing file has "*.log\n*.tmp\n", new template has "*.log\n*.o\n"
+        let existing = "# Existing\n*.log\n*.tmp\n";
+        let new_template = "# New\n*.log\n*.o\n";
+
+        let merged = merge_templates(&[existing, new_template]);
+
+        // *.log should appear only once (from existing)
+        let log_count = merged.lines().filter(|l| l.trim() == "*.log").count();
+        assert_eq!(log_count, 1, "*.log should appear only once after dedup");
+
+        // *.tmp and *.o should both be present
+        assert!(merged.contains("*.tmp"));
+        assert!(merged.contains("*.o"));
+    }
+
+    #[test]
+    fn test_help_includes_append() {
+        assert!(
+            HELP_MSG.contains("--append"),
+            "help message should document --append flag"
+        );
+    }
+
+    #[test]
+    fn test_append_end_to_end() {
+        let dir = unique_dir("e2e_append");
+        let path = dir.join(".gitignore");
+
+        // Create initial file with some Python patterns
+        write_output(&path, "# Existing\n*.pyc\n__pycache__/\n", false).unwrap();
+
+        // Simulate the full append flow: read existing, merge with Go template, write back
+        let existing = read_existing_file(&path).unwrap().unwrap();
+        let go = get_template("go").unwrap();
+        let merged = merge_templates(&[existing.as_str(), go]);
+        write_output(&path, &merged, true).unwrap();
+
+        let result = fs::read_to_string(&path).unwrap();
+
+        // Existing content is preserved at the top
+        assert!(result.starts_with("# Existing\n"));
+        assert!(result.contains("*.pyc"));
+        assert!(result.contains("__pycache__/"));
+
+        // Go patterns are appended
+        assert!(result.contains("*.exe"));
+
+        fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn test_read_existing_file_error_on_unreadable() {
+        let dir = unique_dir("read_unreadable");
+        let path = dir.join("secret.txt");
+        fs::write(&path, "content").unwrap();
+
+        // Remove read permission
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = read_existing_file(&path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("failed to read"));
+
+        // Restore permissions for cleanup
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::remove_dir_all(&dir).ok();
     }
 }
